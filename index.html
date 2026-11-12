@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inverse Filter Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+
+:root {
+  --bg: #f3f4f6;
+  --panel: #ffffff;
+  --ink: #1b1f27;
+  --muted: #5d6573;
+  --line: #d9dce3;
+  --accent: #1f6fb2;
+  --scope-bg: #0f141c;
+  --scope-ink: #c9d3e0;
+  --scope-grid: #233042;
+  --curve: #4aa3ff;
+  --h1: #ff9f43;
+  --h2: #c084fc;
+  --hn: #9fb0c6;
+  --open: #f2c230;
+  --close: #3b82f6;
+  --whoop: #9b5de5;
+  --over: #e05d5d;
+  --font-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11151c;
+    --panel: #181e27;
+    --ink: #e6eaf0;
+    --muted: #97a1b0;
+    --line: #2a3340;
+    --accent: #5aa9ef;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11151c;
+  --panel: #181e27;
+  --ink: #e6eaf0;
+  --muted: #97a1b0;
+  --line: #2a3340;
+  --accent: #5aa9ef;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+}
+.wrap { max-width: 1280px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 20px; }
+h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+.sub { color: var(--muted); margin: 0; font-size: 14px; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; align-items: start; }
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.panel h2 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0; }
+.displays { display: flex; flex-direction: column; gap: 14px; }
+
+/* readout */
+.readout { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 700px) { .readout { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tile .k { font-size: 12px; color: var(--muted); }
+.tile .v { font-family: var(--font-mono); font-size: 20px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tile .s { font-family: var(--font-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.phone-note { display: none; margin: 6px 0 0; }
+@media (hover: none) and (pointer: coarse) { .phone-note { display: block; } }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; font-weight: 600; font-size: 17px; color: #10131a; width: fit-content; }
+.pill.open { background: var(--open); }
+.pill.close { background: var(--close); color: #fff; }
+.pill.whoop { background: var(--whoop); color: #fff; }
+.pill.over { background: var(--over); color: #fff; }
+
+.scopewrap { background: var(--scope-bg); border-radius: 8px; padding: 6px; }
+canvas { display: block; width: 100%; }
+#spec { height: 260px; }
+#staff { height: 290px; min-width: 620px; }
+.staffwrap { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px; overflow-x: auto; }
+.kbdscroll { background: var(--scope-bg); border-radius: 8px; padding: 6px; overflow-x: auto; }
+#kbd { height: 300px; min-width: 980px; touch-action: none; cursor: pointer; }
+#wave { height: 170px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+.rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 700px) { .rules { grid-template-columns: minmax(0, 1fr); } }
+.rule { border-left: 4px solid var(--line); padding: 2px 0 2px 10px; font-size: 13.5px; }
+.rule b { display: block; font-size: 14px; }
+.rule.open { border-color: var(--open); }
+.rule.close { border-color: var(--close); }
+.rule.whoop { border-color: var(--whoop); }
+
+/* controls */
+.controls { display: flex; flex-direction: column; gap: 14px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field .lab { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); }
+.field .lab output { font-family: var(--font-mono); color: var(--ink); font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--accent); }
+button, select {
+  font: inherit; font-size: 14px; color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 7px; padding: 6px 11px; cursor: pointer;
+}
+button:hover, select:hover { border-color: var(--accent); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+#play { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 8px 18px; font-size: 15px; }
+#play.on { background: #c0392b; border-color: #c0392b; }
+.vowels button { font-family: var(--font-mono); min-width: 44px; font-size: 16px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; background: transparent; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.note { font-size: 12.5px; color: var(--muted); margin: 0; }
+.check { display: inline-flex; gap: 6px; align-items: center; font-size: 14px; }
+details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
+details .field { margin-top: 8px; }
+.keys { font-size: 12.5px; color: var(--muted); }
+.keys kbd { font-family: var(--font-mono); font-size: 11.5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--bg); color: var(--ink); }
+#status { font-size: 13px; color: var(--muted); min-height: 1.2em; }
+#flow { height: 240px; }
+#deriv { height: 150px; }
+#input { height: 110px; }
+#spec { height: 270px; touch-action: none; }
+#go { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 8px 18px; font-size: 15px; }
+#go.on { background: #c0392b; border-color: #c0392b; }
+.fr { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.fr-head { display: flex; justify-content: space-between; align-items: center; }
+.fr-head output, .fr-bw output { font-family: var(--font-mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+.fr-bw { display: grid; grid-template-columns: auto 1fr 64px; gap: 8px; align-items: center; }
+.fr-bw output { text-align: right; color: var(--muted); }
+.steps { margin: 0; padding-left: 20px; font-size: 14px; display: flex; flex-direction: column; gap: 4px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Inverse Filter Lab</h1>
+    <p class="sub">Undo the vocal tract's resonances to see the glottal flow underneath. Tune each anti-resonance until the closed phase goes flat.</p>
+  </header>
+
+  <div class="main">
+    <div class="displays">
+      <section class="panel" aria-label="Readout">
+        <div class="readout">
+          <div class="tile"><span class="k">Source</span><span class="v" id="r-src">Demo</span><span class="s" id="r-srcs">not started</span></div>
+          <div class="tile"><span class="k">Pitch (fo)</span><span class="v" id="r-f0">–</span><span class="s" id="r-f0hz">&nbsp;</span></div>
+          <div class="tile"><span class="k">Input level</span><span class="v" id="r-lvl">–</span><span class="s" id="r-lvls">&nbsp;</span></div>
+          <div class="tile"><span class="k">Closed phase</span><span class="v" id="r-flat">–</span><span class="s">ripple left in it</span></div>
+          <div class="tile"><span class="k">View</span><span class="v" id="r-mode">Live</span><span class="s" id="r-modes">&nbsp;</span></div>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="Glottal flow">
+        <div class="row" style="justify-content: space-between;">
+          <h2>Glottal flow (inverse filtered)</h2>
+          <span class="note">Flat stretches are the closed phase. Rising and falling humps are the open phase.</span>
+        </div>
+        <div class="scopewrap"><canvas id="flow" aria-label="Estimated glottal flow waveform"></canvas></div>
+      </section>
+
+      <section class="panel" aria-label="Flow derivative">
+        <div class="row" style="justify-content: space-between;">
+          <h2>Flow derivative</h2>
+          <span class="note">The sharp negative spike is each glottal closure, the moment that excites the tract.</span>
+        </div>
+        <div class="scopewrap"><canvas id="deriv" aria-label="Flow derivative waveform"></canvas></div>
+      </section>
+
+      <section class="panel" aria-label="Spectrum">
+        <div class="row" style="justify-content: space-between;">
+          <h2>Spectrum and filter</h2>
+          <span class="note">Drag a handle left or right to move it, up or down to narrow or widen it.</span>
+        </div>
+        <div class="scopewrap"><canvas id="spec" aria-label="Spectrum of the input and of the inverse-filtered signal, with draggable resonance handles"></canvas></div>
+        <div class="legend">
+          <span><i class="sw" style="background: var(--hn)"></i>input (what the mic hears)</span>
+          <span><i class="sw" style="background: var(--h1)"></i>after inverse filtering</span>
+          <span><i class="sw" style="background: var(--curve)"></i>resonances being removed</span>
+          <span id="leg-true"><i class="sw" style="background: var(--open)"></i>demo voice's true resonances</span>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="Input waveform">
+        <div class="row" style="justify-content: space-between;">
+          <h2>Input waveform</h2>
+          <span class="note">The radiated sound, with every resonance still ringing.</span>
+        </div>
+        <div class="scopewrap"><canvas id="input" aria-label="Input waveform"></canvas></div>
+      </section>
+
+      <section class="panel" aria-label="How to use it">
+        <h2>How to tune it</h2>
+        <ol class="steps">
+          <li>Sing (or play the demo) a steady vowel and press <b>Freeze</b> to hold a few cycles.</li>
+          <li>Press <b>Auto estimate</b> for a starting point.</li>
+          <li>Look at the closed phase in the flow. If it ripples about once per cycle of fR1, move fR1. Faster ripples point to fR2 and above.</li>
+          <li>Widen or narrow each one until the ripple is gone. In the spectrum, the orange trace should lose its peaks and fall off smoothly.</li>
+          <li>If the closed phase tilts or sags instead of rippling, that's usually the microphone, not the voice. Try the low-frequency correction.</li>
+        </ol>
+        <p class="note">Inverse filtering is most reliable on lower, steady pitches with the mic close to the mouth. Above roughly C5, the harmonics are so far apart that fR1 is hard to pin down, by hand or by computer. That limitation is real, not a bug.</p>
+      </section>
+    </div>
+
+    <aside class="panel controls" aria-label="Controls">
+      <div class="field">
+        <div class="lab"><span>Input</span></div>
+        <div class="seg" role="group" aria-label="Input source">
+          <button type="button" data-src="demo" aria-pressed="true">Demo voice</button>
+          <button type="button" data-src="mic" aria-pressed="false">Microphone</button>
+          <button type="button" data-src="file" aria-pressed="false">Audio file</button>
+        </div>
+      </div>
+      <div id="demo-ctl" class="field">
+        <div class="row">
+          <label class="note" for="demo-pitch">Pitch</label>
+          <select id="demo-pitch" aria-label="Demo pitch"></select>
+          <label class="note" for="demo-vowel">Vowel</label>
+          <select id="demo-vowel" aria-label="Demo vowel">
+            <option value="a">[a]</option><option value="i">[i]</option><option value="u">[u]</option>
+            <option value="e">[e]</option><option value="o">[o]</option>
+          </select>
+        </div>
+        <label class="check"><input type="checkbox" id="show-true" checked> Show the demo's true resonances</label>
+      </div>
+      <div id="file-ctl" class="field" hidden>
+        <input type="file" id="file" accept="audio/*" aria-label="Choose an audio file">
+        <p class="note">A steady sustained vowel works best: WAV, MP3, M4A or AIFF.</p>
+      </div>
+      <div id="mic-ctl" class="field" hidden>
+        <p class="note">Use headphones or turn speakers down, and sing about a hand's width from the mic. The browser's echo cancelling, noise suppression and auto level are switched off for this, since they change the waveform.</p>
+      </div>
+
+      <div class="row">
+        <button type="button" id="go">Start</button>
+        <button type="button" id="freeze" aria-pressed="false">Freeze</button>
+        <label class="check" id="monitor-wrap"><input type="checkbox" id="monitor" checked> Hear it</label>
+      </div>
+      <div id="status" role="status"></div>
+      <p class="note phone-note">On an iPhone or iPad, switch the ringer on (off silent) to hear the demo.</p>
+
+      <div class="row">
+        <button type="button" id="auto">Auto estimate</button>
+        <label class="check"><input type="checkbox" id="track"> Keep estimating</label>
+      </div>
+
+      <div id="fr-list"></div>
+
+      <div class="field">
+        <div class="lab"><label for="lfc">Low-frequency correction</label><output id="lfc-out" for="lfc">Off</output></div>
+        <input type="range" id="lfc" min="0" max="80" step="1" value="0">
+        <p class="note">Most mics and interfaces roll off the lowest frequencies, which makes the closed phase tilt or sag. Raise this until the closed phase is level. Leave it off for the demo.</p>
+      </div>
+      <div class="field">
+        <div class="lab"><label for="cycles">Cycles shown</label><output id="cycles-out" for="cycles">3</output></div>
+        <input type="range" id="cycles" min="2" max="6" step="1" value="3">
+      </div>
+      <label class="check"><input type="checkbox" id="invert"> Flip polarity (if the closure spike points up)</label>
+      <p class="keys"><kbd>Space</kbd> freeze or unfreeze · <kbd>A</kbd> auto estimate</p>
+    </aside>
+  </div>
+
+  <section class="panel" aria-label="About">
+    <h2>About</h2>
+    <p class="note">Inverse Filter Lab was made by Chadley Ballantyne (Stetson University) as a companion to the Vowel Synth Lab, in the tradition of Sopran and the interactive inverse filtering pioneered by Svante Granqvist. Each resonance is removed with a second-order anti-resonance filter, and the result is integrated to estimate the glottal flow. The automatic estimate uses linear prediction after a first-pass removal of the glottal tilt, a simplified version of iterative adaptive inverse filtering (IAIF). The demo voice is the same Liljencrants-Fant source and five resonances as the Vowel Synth Lab. Built with Claude.</p>
+  </section>
+</div>
+
+<script>
+"use strict";
+const TABLE_N = 2048;
+const DFT_M = 4096;
+const K_ALL = 200;
+const LEVEL_TOP = [100, 200, 400, 800, 1600, 3200];
+
+function lfPeriod(te, tp, ta, M) {
+  let eps = 1 / ta;
+  for (let i = 0; i < 60; i++) eps = (1 - Math.exp(-eps * (1 - te))) / ta;
+  const wg = Math.PI / tp;
+  const tail = Math.exp(-eps * (1 - te));
+  const areaRet = -(1 / (eps * ta)) * ((1 - tail) / eps - (1 - te) * tail);
+  const areaOpen = (a) => {
+    const E0 = -1 / (Math.exp(a * te) * Math.sin(wg * te));
+    const I = (Math.exp(a * te) * (a * Math.sin(wg * te) - wg * Math.cos(wg * te)) + wg) / (a * a + wg * wg);
+    return E0 * I;
+  };
+  let lo = -60, hi = 120;
+  const flo = areaOpen(lo) + areaRet, fhi = areaOpen(hi) + areaRet;
+  let a = 0;
+  if (flo * fhi < 0) {
+    for (let i = 0; i < 80; i++) {
+      a = (lo + hi) / 2;
+      const fm = areaOpen(a) + areaRet;
+      if ((fm < 0) === (flo < 0)) lo = a; else hi = a;
+    }
+  }
+  const E0 = -1 / (Math.exp(a * te) * Math.sin(wg * te));
+  const d = new Float64Array(M);
+  for (let m = 0; m < M; m++) {
+    const t = m / M;
+    d[m] = t < te ? E0 * Math.exp(a * t) * Math.sin(wg * t)
+                  : -(1 / (eps * ta)) * (Math.exp(-eps * (t - te)) - tail);
+  }
+  return d;
+}
+function closurePeriod(te, ta, M) {
+  const sig = Math.max(ta, 0.004);
+  const d = new Float64Array(M);
+  for (let m = 0; m < M; m++) {
+    let dt = m / M - te;
+    if (dt > 0.5) dt -= 1; if (dt < -0.5) dt += 1;
+    d[m] = -Math.exp(-(dt * dt) / (2 * sig * sig));
+  }
+  return d;
+}
+const COS_M = new Float64Array(DFT_M), SIN_M = new Float64Array(DFT_M);
+for (let i = 0; i < DFT_M; i++) { COS_M[i] = Math.cos(2 * Math.PI * i / DFT_M); SIN_M[i] = Math.sin(2 * Math.PI * i / DFT_M); }
+
+function buildSource(kind, te, ta, sr) {
+  const d = kind === "closure" ? closurePeriod(te, ta, DFT_M) : lfPeriod(te, te * 0.75, ta, DFT_M);
+  const re = new Float64Array(K_ALL + 1), im = new Float64Array(K_ALL + 1), amps = new Float64Array(K_ALL + 1);
+  for (let k = 1; k <= K_ALL; k++) {
+    let r = 0, q = 0;
+    for (let m = 0, idx = 0; m < DFT_M; m++, idx = (idx + k) & (DFT_M - 1)) { r += d[m] * COS_M[idx]; q -= d[m] * SIN_M[idx]; }
+    re[k] = r * 2 / DFT_M; im[k] = q * 2 / DFT_M; amps[k] = Math.hypot(re[k], im[k]);
+  }
+  const tables = LEVEL_TOP.map((top) => {
+    const K = Math.max(1, Math.min(K_ALL, Math.floor(0.45 * sr / top)));
+    const tb = new Float32Array(TABLE_N + 1);
+    for (let n = 0; n < TABLE_N; n++) {
+      let v = 0;
+      for (let k = 1; k <= K; k++) {
+        const th = 2 * Math.PI * k * n / TABLE_N;
+        v += re[k] * Math.cos(th) - im[k] * Math.sin(th);
+      }
+      tb[n] = v;
+    }
+    tb[TABLE_N] = tb[0];
+    return tb;
+  });
+  return { tables, amps, te };
+}
+
+/* ===================== DSP voice: shared by the audio thread and the displays ===================== */
+class Voice {
+  constructor(sr) {
+    this.sr = sr;
+    this.phase = 0; this.vibPhase = 0;
+    this.lf0 = Math.log(262); this.f0T = 262; this.glide = 0.03;
+    this.F = [550, 950, 3100, 3900, 4600]; this.FT = this.F.slice();
+    this.BW = [70, 90, 130, 180, 220]; this.BWT = this.BW.slice();
+    this.A = new Float64Array(5); this.B = new Float64Array(5); this.C = new Float64Array(5);
+    this.Ao = new Float64Array(5); this.Bo = new Float64Array(5); this.Co = new Float64Array(5);
+    this.openDamp = 0.5;
+    this.y1 = new Float64Array(5); this.y2 = new Float64Array(5);
+    this.tables = null; this.levelTop = [100, 200, 400, 800, 1600, 3200]; this.te = 0.6;
+    this.noise = 0.02; this.vib = false; this.vibRate = 5.5; this.vibExt = 0.45;
+    this.amp = 0; this.ampT = 0; this.gain = 1; this.env = 0; this.relK = Math.exp(-1 / (0.3 * sr));
+    this.count = 0; this.seed = 22222; this.closures = null;
+    this.coefs();
+  }
+  set(p) {
+    if (p.f0 !== undefined) this.f0T = p.f0;
+    if (p.glide !== undefined) this.glide = p.glide;
+    if (p.F) this.FT = p.F.slice();
+    if (p.BW) this.BWT = p.BW.slice();
+    if (p.tables) this.tables = p.tables;
+    if (p.levelTop) this.levelTop = p.levelTop;
+    if (p.te !== undefined) this.te = p.te;
+    if (p.noise !== undefined) this.noise = p.noise;
+    if (p.vib !== undefined) this.vib = p.vib;
+    if (p.vibRate !== undefined) this.vibRate = p.vibRate;
+    if (p.vibExt !== undefined) this.vibExt = p.vibExt;
+    if (p.openDamp !== undefined) this.openDamp = p.openDamp;
+    if (p.amp !== undefined) this.ampT = p.amp;
+    if (p.gain !== undefined) this.gain = p.gain;
+  }
+  snap() { this.F = this.FT.slice(); this.BW = this.BWT.slice(); this.lf0 = Math.log(this.f0T); this.amp = this.ampT; this.coefs(); }
+  coefs() {
+    const T = 1 / this.sr;
+    for (let i = 0; i < 5; i++) {
+      const r = Math.exp(-Math.PI * this.BW[i] * T);
+      const c = -r * r, b = 2 * r * Math.cos(2 * Math.PI * this.F[i] * T);
+      this.B[i] = b; this.C[i] = c; this.A[i] = 1 - b - c;
+      const ro = Math.exp(-Math.PI * this.BW[i] * (1 + this.openDamp * (i === 0 ? 1.5 : 1)) * T);
+      const co = -ro * ro, bo = 2 * ro * Math.cos(2 * Math.PI * this.F[i] * T);
+      this.Bo[i] = bo; this.Co[i] = co; this.Ao[i] = 1 - bo - co;
+    }
+  }
+  rand() { this.seed = (this.seed * 1103515245 + 12345) & 0x7fffffff; return this.seed / 0x3fffffff - 1; }
+  render(out, n) {
+    const sr = this.sr;
+    const k16 = 1 - Math.exp(-16 / (sr * 0.015));
+    const kG = 1 - Math.exp(-1 / (sr * Math.max(this.glide, 0.002)));
+    const kA = 1 - Math.exp(-1 / (sr * 0.02));
+    const tabs = this.tables;
+    for (let s = 0; s < n; s++) {
+      if ((this.count++ & 15) === 0) {
+        for (let i = 0; i < 5; i++) { this.F[i] += (this.FT[i] - this.F[i]) * k16; this.BW[i] += (this.BWT[i] - this.BW[i]) * k16; }
+        this.coefs();
+      }
+      this.lf0 += (Math.log(this.f0T) - this.lf0) * kG;
+      let f = Math.exp(this.lf0);
+      if (this.vib) {
+        this.vibPhase += this.vibRate / sr; if (this.vibPhase >= 1) this.vibPhase -= 1;
+        f *= Math.pow(2, this.vibExt / 12 * Math.sin(2 * Math.PI * this.vibPhase));
+      }
+      const before = this.phase;
+      this.phase += f / sr;
+      if (this.phase >= 1) this.phase -= 1;
+      if (this.closures && ((before < this.te && this.phase >= this.te) || (this.phase < before && before < this.te))) this.closures.push(s);
+      let x = 0;
+      if (tabs) {
+        let L = 0; while (L < this.levelTop.length - 1 && f > this.levelTop[L]) L++;
+        const tb = tabs[L], N = tb.length - 1, pos = this.phase * N, i0 = pos | 0, fr = pos - i0;
+        x = (tb[i0] + (tb[i0 + 1] - tb[i0]) * fr) * 0.05;
+      }
+      if (this.noise > 0) x += this.rand() * this.noise * (this.phase < this.te ? 1 : 0.15) * 0.02;
+      const open = this.phase < this.te;
+      const A = open ? this.Ao : this.A, B = open ? this.Bo : this.B, C = open ? this.Co : this.C;
+      for (let i = 0; i < 5; i++) {
+        const y = A[i] * x + B[i] * this.y1[i] + C[i] * this.y2[i];
+        this.y2[i] = this.y1[i]; this.y1[i] = y; x = y;
+      }
+      this.amp += (this.ampT - this.amp) * kA;
+      const yv = x * this.gain * this.amp, ay = Math.abs(yv);
+      this.env = ay > this.env ? ay : this.env * this.relK;
+      const lim = this.env > 0.6 ? 0.6 / this.env : 1;
+      out[s] = Math.tanh(yv * lim);
+    }
+  }
+}
+
+
+/* ===================== State ===================== */
+const FR_DEF = [
+  { f: 700, bw: 80, lo: 150, hi: 1300 },
+  { f: 1200, bw: 100, lo: 500, hi: 3000 },
+  { f: 2600, bw: 140, lo: 1500, hi: 3900 },
+  { f: 3400, bw: 180, lo: 2400, hi: 4800 },
+  { f: 4200, bw: 220, lo: 3000, hi: 5600 }
+];
+const state = {
+  src: "demo", running: false, frozen: false, monitor: true,
+  fr: FR_DEF.map((d) => ({ f: d.f, bw: d.bw, on: true })),
+  lfc: 0, cycles: 3, invert: false, leak: 4, track: false,
+  demoPitch: 110, leakPeriods: 1, lp: 5000, demoVowel: "a", showTrue: true
+};
+const DEMO_VOWELS = {
+  low:    { a: [720, 1100], i: [280, 2250], u: [310, 820], e: [400, 2000], o: [460, 820], hi: [2550, 3400, 4200] },
+  treble: { a: [850, 1250], i: [310, 2700], u: [380, 900], e: [460, 2400], o: [550, 950], hi: [3100, 3900, 4600] }
+};
+const DEMO_BW = [70, 90, 130, 180, 220];
+const DEMO_PITCHES = [["A2", 110], ["D3", 147], ["G3", 196], ["C4", 262], ["G4", 392], ["C5", 523], ["G5", 784]];
+let demoTrue = null;
+
+const $ = (id) => document.getElementById(id);
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function fitCanvas(c) {
+  const dpr = window.devicePixelRatio || 1, w = c.clientWidth, h = c.clientHeight;
+  if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+  const g = c.getContext("2d"); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return [g, w, h];
+}
+const NAMES = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
+const noteOf = (hz) => { const m = Math.round(69 + 12 * Math.log2(hz / 440)); return NAMES[((m % 12) + 12) % 12] + (Math.floor(m / 12) - 1); };
+
+/* ===================== Ring buffer of incoming audio ===================== */
+let fs = 48000;
+let RING = new Float32Array(fs * 2), ringPos = 0, ringFilled = 0;
+function pushSamples(block) {
+  for (let i = 0; i < block.length; i++) { RING[ringPos] = block[i]; ringPos = (ringPos + 1) % RING.length; }
+  ringFilled = Math.min(RING.length, ringFilled + block.length);
+}
+function lastSamples(n) {
+  n = Math.min(n, ringFilled);
+  const out = new Float64Array(n);
+  let p = (ringPos - n + RING.length) % RING.length;
+  for (let i = 0; i < n; i++) { out[i] = RING[p]; p = (p + 1) % RING.length; }
+  return out;
+}
+let frozenBuf = null;
+
+/* ===================== Audio graph ===================== */
+let ctx = null, capture = null, srcNode = null, monGain = null, micStream = null, fileBuffer = null;
+const CAPTURE_SRC = `
+class Cap extends AudioWorkletProcessor {
+  constructor() { super(); this.buf = new Float32Array(1024); this.n = 0; }
+  process(inputs, outputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (ch) for (let i = 0; i < ch.length; i++) { this.buf[this.n++] = ch[i]; if (this.n === 1024) { this.port.postMessage(this.buf.slice(0)); this.n = 0; } }
+    if (outputs[0] && outputs[0][0]) outputs[0][0].fill(0);
+    return true;
+  }
+}
+registerProcessor("cap", Cap);`;
+async function ensureCtx() {
+  if (ctx) { if (ctx.state !== "running") await ctx.resume(); return; }
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  fs = ctx.sampleRate;
+  RING = new Float32Array(Math.round(fs * 2)); ringPos = 0; ringFilled = 0;
+  monGain = ctx.createGain(); monGain.gain.value = state.monitor ? 0.8 : 0; monGain.connect(ctx.destination);
+  try {
+    const url = URL.createObjectURL(new Blob([CAPTURE_SRC], { type: "text/javascript" }));
+    await ctx.audioWorklet.addModule(url);
+    capture = new AudioWorkletNode(ctx, "cap", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+    capture.port.onmessage = (e) => pushSamples(e.data);
+  } catch (err) {
+    capture = ctx.createScriptProcessor(1024, 1, 1);
+    capture.onaudioprocess = (e) => { pushSamples(e.inputBuffer.getChannelData(0)); e.outputBuffer.getChannelData(0).fill(0); };
+  }
+  const sink = ctx.createGain(); sink.gain.value = 0; capture.connect(sink); sink.connect(ctx.destination);
+}
+function stopSource() {
+  if (srcNode) { try { srcNode.stop && srcNode.stop(); } catch (e) {} try { srcNode.disconnect(); } catch (e) {} srcNode = null; }
+  if (micStream) { micStream.getTracks().forEach((t) => t.stop()); micStream = null; }
+}
+function makeDemoBuffer() {
+  const V = DEMO_VOWELS[state.demoPitch >= 300 ? "treble" : "low"], v = V[state.demoVowel];
+  const F = [v[0], v[1], V.hi[0], V.hi[1], V.hi[2]];
+  demoTrue = F.map((f, i) => ({ f, bw: DEMO_BW[i] }));
+  const sr = fs, src = buildSource("lf", 0.55, 0.012, sr), voice = new Voice(sr);
+  const f0 = state.demoPitch;
+  voice.set({ f0, F, BW: DEMO_BW, tables: src.tables, levelTop: LEVEL_TOP, te: 0.55, noise: 0, amp: 1, gain: 0.002, openDamp: 0, vib: false });
+  voice.snap();
+  const periods = Math.round(2.0 * f0), n = Math.round(periods * sr / f0);
+  const pre = new Float32Array(Math.round(sr * 0.3)); voice.render(pre, pre.length);
+  const out = new Float32Array(n); voice.render(out, n);
+  let pk = 0; for (let i = 0; i < n; i++) pk = Math.max(pk, Math.abs(out[i]));
+  for (let i = 0; i < n; i++) out[i] = out[i] / pk * 0.5;
+  const buf = ctx.createBuffer(1, n, sr); buf.copyToChannel(out, 0);
+  return buf;
+}
+async function startSource() {
+  await ensureCtx();
+  stopSource();
+  ringFilled = 0;
+  if (state.src === "mic") {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("nomic");
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
+    srcNode = ctx.createMediaStreamSource(micStream);
+    srcNode.connect(capture);
+  } else {
+    const buf = state.src === "demo" ? makeDemoBuffer() : fileBuffer;
+    if (!buf) throw new Error("nofile");
+    srcNode = ctx.createBufferSource(); srcNode.buffer = buf; srcNode.loop = true;
+    srcNode.connect(capture); srcNode.connect(monGain);
+    srcNode.start();
+  }
+}
+const statusEl = $("status"), goBtn = $("go");
+async function setRunning(on) {
+  if (on) {
+    try {
+      await startSource();
+      state.running = true; setFrozen(false);
+      statusEl.textContent = "";
+    } catch (err) {
+      state.running = false;
+      if (err && err.message === "nofile") statusEl.textContent = "Choose an audio file first.";
+      else if (state.src === "mic") statusEl.textContent = "The microphone isn't available here. This preview blocks it. Open the published page (on GitHub) in Chrome or Safari, and allow the mic when asked.";
+      else statusEl.textContent = "Audio could not start. Click Start again.";
+    }
+  } else { stopSource(); state.running = false; }
+  goBtn.textContent = state.running ? "Stop" : "Start";
+  goBtn.classList.toggle("on", state.running);
+  updateLabels();
+}
+goBtn.addEventListener("click", () => setRunning(!state.running));
+
+/* ===================== DSP ===================== */
+function inverseFilter(x) {
+  const n = x.length, y = Float64Array.from(x);
+  if (state.invert) for (let i = 0; i < n; i++) y[i] = -y[i];
+  // undo a first-order microphone high-pass (corner lfc), with a slight leak so it stays stable
+  if (state.lfc > 0) {
+    const a = Math.exp(-2 * Math.PI * state.lfc / fs), p = Math.exp(-2 * Math.PI * 0.5 / fs);
+    let x1 = 0, y1 = 0;
+    for (let i = 0; i < n; i++) { const xi = y[i]; const v = xi - a * x1 + p * y1; x1 = xi; y1 = v; y[i] = v; }
+  }
+  const corrected = Float64Array.from(y);
+  // anti-resonances (unity gain at 0 Hz)
+  for (const r of state.fr) {
+    if (!r.on) continue;
+    const rr = Math.exp(-Math.PI * r.bw / fs), b = 2 * rr * Math.cos(2 * Math.PI * r.f / fs), c = rr * rr, g = 1 - b + c;
+    let x1 = 0, x2 = 0;
+    for (let i = 0; i < n; i++) { const xi = y[i]; y[i] = (xi - b * x1 + c * x2) / g; x2 = x1; x1 = xi; }
+  }
+  lowpassInPlace(y, state.lp);
+  // y is the flow derivative; integrate with a slow leak to get flow
+  const flow = new Float64Array(n), p = Math.exp(-2 * Math.PI * 0.5 / fs);
+  let acc = 0, mean = 0;
+  for (let i = 0; i < n; i++) mean += y[i]; mean /= n;
+  for (let i = 0; i < n; i++) { acc = acc * p + (y[i] - mean); flow[i] = acc; }
+  return { corrected, deriv: y, flow };
+}
+const LP_CACHE = {};
+function lowpassInPlace(x, fc) {
+  const key = fs + ":" + fc;
+  let h = LP_CACHE[key];
+  if (!h) {
+    const taps = 129, M = 64, c = fc / fs; h = new Float64Array(taps); let sum = 0;
+    for (let k = 0; k < taps; k++) { const t = k - M, s = t === 0 ? 2 * c : Math.sin(2 * Math.PI * c * t) / (Math.PI * t); h[k] = s * (0.42 - 0.5 * Math.cos(2 * Math.PI * k / (taps - 1)) + 0.08 * Math.cos(4 * Math.PI * k / (taps - 1))); sum += h[k]; }
+    for (let k = 0; k < taps; k++) h[k] /= sum;
+    LP_CACHE[key] = h;
+  }
+  const n = x.length, M = (h.length - 1) / 2, src = Float64Array.from(x);
+  for (let i = 0; i < n; i++) { let v = 0; for (let k = 0; k < h.length; k++) { const j = i + k - M; if (j >= 0 && j < n) v += h[k] * src[j]; } x[i] = v; }
+}
+function decimate(x, D) {
+  if (D <= 1) return Float64Array.from(x);
+  const taps = 63, h = new Float64Array(taps), fc = 0.45 / D, M = (taps - 1) / 2;
+  let s = 0;
+  for (let k = 0; k < taps; k++) {
+    const t = k - M, sinc = t === 0 ? 2 * fc : Math.sin(2 * Math.PI * fc * t) / (Math.PI * t);
+    h[k] = sinc * (0.54 - 0.46 * Math.cos(2 * Math.PI * k / (taps - 1))); s += h[k];
+  }
+  const m = Math.floor((x.length - taps) / D), out = new Float64Array(Math.max(0, m));
+  for (let j = 0; j < m; j++) { let v = 0; const o = j * D; for (let k = 0; k < taps; k++) v += h[k] * x[o + k]; out[j] = v / s; }
+  return out;
+}
+function pitchOf(x, rate) {
+  const n = Math.min(x.length, Math.round(rate * 0.06)), seg = x.subarray(x.length - n);
+  let mean = 0; for (let i = 0; i < n; i++) mean += seg[i]; mean /= n;
+  const z = new Float64Array(n); let e = 0; for (let i = 0; i < n; i++) { z[i] = seg[i] - mean; e += z[i] * z[i]; }
+  if (e < 1e-9) return { f0: 0, conf: 0 };
+  const lo = Math.floor(rate / 1100), hi = Math.min(Math.floor(rate / 60), n - 10);
+  const r = new Float64Array(hi + 2);
+  for (let L = lo; L <= hi + 1; L++) {
+    let s = 0, e1 = 0, e2 = 0;
+    for (let i = 0; i + L < n; i++) { s += z[i] * z[i + L]; e1 += z[i] * z[i]; e2 += z[i + L] * z[i + L]; }
+    r[L] = s / Math.sqrt(e1 * e2 + 1e-12);
+  }
+  let best = -1, bl = 0;
+  for (let L = lo + 1; L <= hi; L++) if (r[L] > r[L - 1] && r[L] >= r[L + 1] && r[L] > best) { best = r[L]; bl = L; }
+  // prefer the shortest lag that is nearly as good (avoids octave errors)
+  for (let L = lo + 1; L <= hi; L++) if (r[L] > r[L - 1] && r[L] >= r[L + 1] && r[L] > 0.9 * best) { bl = L; break; }
+  if (!bl) return { f0: 0, conf: 0 };
+  const a = r[bl - 1], b = r[bl], c = r[bl + 1], d = (a - c) / (2 * (a - 2 * b + c) || 1);
+  return { f0: rate / (bl + Math.max(-0.5, Math.min(0.5, d))), conf: r[bl] };
+}
+function lpc(x, p) {
+  const n = x.length, R = new Float64Array(p + 1);
+  for (let k = 0; k <= p; k++) { let s = 0; for (let i = k; i < n; i++) s += x[i] * x[i - k]; R[k] = s; }
+  R[0] *= 1.0001;
+  const a = new Float64Array(p + 1); a[0] = 1; let E = R[0];
+  if (E <= 0) return a;
+  for (let i = 1; i <= p; i++) {
+    let acc = R[i]; for (let j = 1; j < i; j++) acc += a[j] * R[i - j];
+    const k = -acc / E, prev = a.slice();
+    for (let j = 1; j < i; j++) a[j] = prev[j] + k * prev[i - j];
+    a[i] = k; E *= (1 - k * k);
+  }
+  return a;
+}
+function polyRoots(a) {
+  // roots of z^p + a1 z^(p-1) + ... + ap  (Durand-Kerner)
+  const p = a.length - 1, re = new Float64Array(p), im = new Float64Array(p);
+  for (let k = 0; k < p; k++) { const ang = 2 * Math.PI * k / p + 0.4; re[k] = 0.9 * Math.cos(ang); im[k] = 0.9 * Math.sin(ang); }
+  for (let it = 0; it < 600; it++) {
+    let moved = 0;
+    for (let k = 0; k < p; k++) {
+      let pr = 1, pi = 0;
+      for (let j = 1; j <= p; j++) { const nr = pr * re[k] - pi * im[k] + a[j], ni = pr * im[k] + pi * re[k]; pr = nr; pi = ni; }
+      let dr = 1, di = 0;
+      for (let j = 0; j < p; j++) if (j !== k) { const xr = re[k] - re[j], xi = im[k] - im[j]; const nr = dr * xr - di * xi, ni = dr * xi + di * xr; dr = nr; di = ni; }
+      const den = dr * dr + di * di || 1e-30, qr = (pr * dr + pi * di) / den, qi = (pi * dr - pr * di) / den;
+      re[k] -= qr; im[k] -= qi; moved += Math.abs(qr) + Math.abs(qi);
+    }
+    if (moved < 1e-12) break;
+  }
+  return Array.from(re, (r, i) => [r, im[i]]);
+}
+function applyFIR(x, a) {
+  const y = new Float64Array(x.length);
+  for (let i = 0; i < x.length; i++) { let v = 0; for (let k = 0; k < a.length && k <= i; k++) v += a[k] * x[i - k]; y[i] = v; }
+  return y;
+}
+function hann(x) { const n = x.length, y = new Float64Array(n); for (let i = 0; i < n; i++) y[i] = x[i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1))); return y; }
+function estimate(x, f0) {
+  const D = Math.max(1, Math.floor(fs / 11000)), rate = fs / D;
+  let d = decimate(x, D);
+  const want = Math.max(Math.round(rate * 0.03), f0 ? Math.round(3 * rate / f0) : 0);
+  d = d.subarray(Math.max(0, d.length - want));
+  let mean = 0; for (const v of d) mean += v; mean /= d.length;
+  d = d.map((v) => v - mean);
+  // remove the glottal tilt first (IAIF, first pass)
+  const g1 = lpc(hann(d), 1), t = applyFIR(d, g1);
+  const p = Math.round(rate / 1000) + 2, a = lpc(hann(t), p);
+  const found = [];
+  for (const [re, im] of polyRoots(a)) {
+    if (im <= 0) continue;
+    const mag = Math.hypot(re, im), f = Math.atan2(im, re) * rate / (2 * Math.PI), bw = -Math.log(mag) * rate / Math.PI;
+    if (f > 150 && f < rate / 2 - 150 && bw > 0 && bw < 600) found.push({ f, bw: Math.max(30, Math.min(400, bw)) });
+  }
+  found.sort((u, v) => u.f - v.f);
+  return found.slice(0, 5);
+}
+function applyEstimate(est, blend) {
+  est.forEach((e, i) => {
+    const r = state.fr[i], d = FR_DEF[i];
+    const f = Math.max(d.lo, Math.min(d.hi, e.f)), bw = Math.max(30, Math.min(500, e.bw));
+    r.f = blend < 1 ? r.f * Math.pow(f / r.f, blend) : f;
+    r.bw = blend < 1 ? r.bw * Math.pow(bw / r.bw, blend) : bw;
+    r.on = true;
+  });
+  syncSliders();
+}
+
+/* ===================== Analysis of the current window ===================== */
+let last = null;
+// subtract a running mean one period long: for a periodic signal it is constant, so the flow shape is untouched
+function removeBaseline(flow, T) {
+  const L = Math.max(2, Math.round(T)), n = flow.length, cs = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) cs[i + 1] = cs[i] + flow[i];
+  const base = new Float64Array(n);
+  for (let i = 0; i < n; i++) { const a = Math.max(0, i - (L >> 1)), b = Math.min(n, a + L); base[i] = (cs[b] - cs[a]) / (b - a); }
+  for (let i = 0; i < n; i++) flow[i] -= base[i];
+}
+// how much the closed phase still moves, relative to the height of the flow pulse (0 = perfectly flat)
+const CLOSED_A = 0.06, CLOSED_B = 0.25;
+function closedRipple(flow, gcis, T, s0, s1) {
+  let lo = Infinity, hi = -Infinity;
+  for (let i = s0; i < s1; i++) { lo = Math.min(lo, flow[i]); hi = Math.max(hi, flow[i]); }
+  if (!(hi > lo)) return null;
+  let rip = 0, cnt = 0;
+  for (const gi of gcis) {
+    const a = Math.round(gi + CLOSED_A * T), b = Math.round(gi + CLOSED_B * T);
+    let mn = Infinity, mx = -Infinity;
+    for (let i = a; i < b; i++) { mn = Math.min(mn, flow[i]); mx = Math.max(mx, flow[i]); }
+    if (isFinite(mn)) { rip += mx - mn; cnt++; }
+  }
+  return cnt ? rip / cnt / (hi - lo) : null;
+}
+function analyze() {
+  const src = state.frozen && frozenBuf ? frozenBuf : lastSamples(Math.round(fs * 0.3));
+  if (src.length < fs * 0.1) return null;
+  const { corrected, deriv, flow } = inverseFilter(src);
+  const D = Math.max(1, Math.floor(fs / 11000));
+  const pd = pitchOf(decimate(corrected, D), fs / D);
+  if (pd.f0 > 0 && pd.conf > 0.5) removeBaseline(flow, fs / pd.f0);
+  let level = 0; for (let i = src.length - Math.round(fs * 0.05); i < src.length; i++) level = Math.max(level, Math.abs(src[i]));
+  const out = { src, corrected, deriv, flow, f0: pd.f0, conf: pd.conf, level };
+  if (pd.f0 > 0 && pd.conf > 0.5) {
+    const T = fs / pd.f0, n = src.length, pad = Math.round(0.02 * fs);
+    let g = -1, gv = Infinity;
+    for (let i = Math.max(1, Math.round(n - pad - 1.3 * T)); i < n - pad - 0.3 * T; i++) if (deriv[i] < gv) { gv = deriv[i]; g = i; }
+    const cyc = state.cycles, s0 = Math.round(g - cyc * T - 0.15 * T), s1 = Math.round(g - 0.15 * T);
+    if (s0 > 0) {
+      out.view = [s0, s1];
+      const gcis = [];
+      for (let k = cyc; k >= 1; k--) {
+        const c = g - k * T; let bi = -1, bv = Infinity;
+        for (let i = Math.round(c - 0.25 * T); i <= Math.round(c + 0.25 * T); i++) if (deriv[i] < bv) { bv = deriv[i]; bi = i; }
+        gcis.push(bi);
+      }
+      out.gcis = gcis;
+      out.ripple = closedRipple(flow, gcis, T, s0, s1);
+    }
+  }
+  return out;
+}
+
+/* ===================== Drawing ===================== */
+const flowCv = $("flow"), derivCv = $("deriv"), specCv = $("spec"), inputCv = $("input");
+function scope(cv, data, view, opts) {
+  const [g, w, h] = fitCanvas(cv);
+  const ink = cssVar("--scope-ink"), grid = cssVar("--scope-grid");
+  g.clearRect(0, 0, w, h);
+  g.font = "11px " + cssVar("--font-mono");
+  if (!data || !view) {
+    g.fillStyle = ink; g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(state.running ? "Listening for a steady pitched sound…" : "Press Start", w / 2, h / 2);
+    return;
+  }
+  const [s0, s1] = view, padL = 8, padR = 8, padT = 16, padB = 8, pw = w - padL - padR, ph = h - padT - padB;
+  let lo = Infinity, hi = -Infinity;
+  for (let i = s0; i < s1; i++) { lo = Math.min(lo, data[i]); hi = Math.max(hi, data[i]); }
+  if (opts.center) { const m = Math.max(Math.abs(lo), Math.abs(hi)) || 1; lo = -m; hi = m; }
+  const span = hi - lo || 1;
+  const X = (i) => padL + (i - s0) / (s1 - s0) * pw, Y = (v) => padT + (1 - (v - lo) / span) * ph * 0.92 + ph * 0.04;
+  g.strokeStyle = grid; g.lineWidth = 1;
+  if (opts.center) { g.beginPath(); g.moveTo(padL, Y(0) + 0.5); g.lineTo(padL + pw, Y(0) + 0.5); g.stroke(); }
+  if (opts.gcis) {
+    g.setLineDash([4, 4]); g.strokeStyle = cssVar("--h1"); g.globalAlpha = 0.6;
+    g.fillStyle = cssVar("--h1"); g.textAlign = "center"; g.textBaseline = "top";
+    opts.gcis.forEach((gi) => { const x = X(gi); g.beginPath(); g.moveTo(x, padT); g.lineTo(x, padT + ph); g.stroke(); g.fillText("closure", x, 2); });
+    g.setLineDash([]); g.globalAlpha = 1;
+  }
+  g.beginPath();
+  for (let i = s0; i < s1; i++) { const x = X(i), y = Y(data[i]); i === s0 ? g.moveTo(x, y) : g.lineTo(x, y); }
+  g.strokeStyle = opts.color; g.lineWidth = opts.width || 2; g.stroke();
+  if (opts.fill) { g.lineTo(X(s1 - 1), padT + ph); g.lineTo(X(s0), padT + ph); g.closePath(); g.globalAlpha = 0.15; g.fillStyle = opts.color; g.fill(); g.globalAlpha = 1; }
+}
+/* FFT (radix-2, in place) */
+function fft(re, im) {
+  const n = re.length;
+  for (let i = 1, j = 0; i < n; i++) { let bit = n >> 1; for (; j & bit; bit >>= 1) j ^= bit; j ^= bit; if (i < j) { [re[i], re[j]] = [re[j], re[i]]; [im[i], im[j]] = [im[j], im[i]]; } }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let cr = 1, ci = 0;
+      for (let j = 0; j < len / 2; j++) {
+        const ar = re[i + j + len / 2] * cr - im[i + j + len / 2] * ci, ai = re[i + j + len / 2] * ci + im[i + j + len / 2] * cr;
+        re[i + j + len / 2] = re[i + j] - ar; im[i + j + len / 2] = im[i + j] - ai; re[i + j] += ar; im[i + j] += ai;
+        const t = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = t;
+      }
+    }
+  }
+}
+function specDB(x) {
+  const N = 8192, n = Math.min(N, x.length), re = new Float64Array(N), im = new Float64Array(N);
+  const o = x.length - n;
+  for (let i = 0; i < n; i++) re[i] = x[o + i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / (n - 1)));
+  fft(re, im);
+  const db = new Float64Array(N / 2); let mx = -Infinity;
+  for (let k = 0; k < N / 2; k++) { db[k] = 10 * Math.log10(re[k] * re[k] + im[k] * im[k] + 1e-20); if (db[k] > mx) mx = db[k]; }
+  for (let k = 0; k < N / 2; k++) db[k] -= mx;
+  return { db, N };
+}
+function tractDB(f) {
+  let m = 1;
+  for (const r of state.fr) {
+    if (!r.on) continue;
+    const den = Math.hypot(r.f * r.f - f * f, f * r.bw);
+    m *= (r.f * r.f + (r.bw / 2) ** 2) / Math.max(den, 1e-9);
+  }
+  return 20 * Math.log10(m);
+}
+const FMAX = 5000, DBMIN = -70;
+let specGeom = null;
+function drawSpec(a) {
+  const [g, w, h] = fitCanvas(specCv);
+  const ink = cssVar("--scope-ink"), grid = cssVar("--scope-grid"), curveCol = cssVar("--curve");
+  g.clearRect(0, 0, w, h); g.font = "11px " + cssVar("--font-mono");
+  const padL = 40, padR = 10, padT = 26, padB = 22, pw = w - padL - padR, ph = h - padT - padB;
+  const X = (f) => padL + f / FMAX * pw, Y = (db) => padT + Math.min(1, Math.max(0, db / DBMIN)) * ph;
+  specGeom = { padL, padT, pw, ph, X, F: (x) => (x - padL) / pw * FMAX };
+  g.strokeStyle = grid; g.fillStyle = ink; g.lineWidth = 1; g.textAlign = "center"; g.textBaseline = "top";
+  for (let f = 0; f <= FMAX; f += 500) { g.beginPath(); g.moveTo(X(f) + 0.5, padT); g.lineTo(X(f) + 0.5, padT + ph); g.stroke(); g.fillText(f >= 1000 ? f / 1000 + "k" : String(f), X(f), padT + ph + 5); }
+  g.textAlign = "right"; g.textBaseline = "middle";
+  for (let db = 0; db >= DBMIN; db -= 20) { g.beginPath(); g.moveTo(padL, Y(db) + 0.5); g.lineTo(padL + pw, Y(db) + 0.5); g.stroke(); g.fillText(db + " dB", padL - 4, Y(db)); }
+  const line = (sp, col, wid) => {
+    if (!sp) return;
+    g.beginPath();
+    for (let px = 0; px <= pw; px++) {
+      const f = px / pw * FMAX, k = f / fs * sp.N, k0 = Math.floor(k), per = sp.N / fs * FMAX / pw;
+      const k1 = Math.min(sp.db.length - 1, Math.floor(k + per));
+      let v = -Infinity; for (let j = k0; j <= Math.max(k0, k1); j++) v = Math.max(v, sp.db[j]);
+      const y = Y(v); px ? g.lineTo(padL + px, y) : g.moveTo(padL, y);
+    }
+    g.strokeStyle = col; g.lineWidth = wid; g.stroke();
+  };
+  if (a) { line(a.specIn, cssVar("--hn"), 1.2); line(a.specOut, cssVar("--h1"), 1.6); }
+  // the resonance model being removed
+  let cmax = -Infinity; const cv = [];
+  for (let px = 0; px <= pw; px++) { const v = tractDB(Math.max(1, px / pw * FMAX)); cv.push(v); cmax = Math.max(cmax, v); }
+  g.beginPath(); cv.forEach((v, px) => { const y = Y(v - cmax); px ? g.lineTo(padL + px, y) : g.moveTo(padL, y); });
+  g.strokeStyle = curveCol; g.lineWidth = 2; g.stroke();
+  // true resonances of the demo voice
+  if (state.src === "demo" && state.showTrue && demoTrue) {
+    g.fillStyle = cssVar("--open");
+    demoTrue.forEach((t) => { const x = X(t.f); g.beginPath(); g.moveTo(x, padT + ph); g.lineTo(x - 5, padT + ph + 9); g.lineTo(x + 5, padT + ph + 9); g.closePath(); g.fill(); });
+  }
+  // handles
+  state.fr.forEach((r, i) => {
+    const x = X(r.f), y = Y(tractDB(r.f) - cmax);
+    g.globalAlpha = r.on ? 1 : 0.35;
+    g.strokeStyle = curveCol; g.setLineDash([3, 4]); g.lineWidth = 1;
+    g.beginPath(); g.moveTo(x, padT); g.lineTo(x, padT + ph); g.stroke(); g.setLineDash([]);
+    g.fillStyle = curveCol; g.beginPath(); g.roundRect ? g.roundRect(x - 17, 3, 34, 18, 9) : g.rect(x - 17, 3, 34, 18); g.fill();
+    g.fillStyle = "#08111c"; g.textAlign = "center"; g.textBaseline = "middle"; g.font = "600 11px " + cssVar("--font-mono");
+    g.fillText("fR" + (i + 1), x, 12.5);
+    g.beginPath(); g.arc(x, Math.max(padT + 6, y), 6, 0, 2 * Math.PI); g.fillStyle = curveCol; g.fill();
+    g.globalAlpha = 1; g.font = "11px " + cssVar("--font-mono");
+  });
+}
+let needsDraw = true;
+function render() {
+  const a = analyze();
+  last = a;
+  if (a) {
+    const n = a.src.length, seg = Math.min(n, Math.round(fs * 0.17));
+    a.specIn = specDB(a.corrected.subarray(n - seg));
+    a.specOut = specDB(a.deriv.subarray(n - seg));
+    if (state.track && !state.frozen && a.f0 && a.conf > 0.6) applyEstimate(estimate(a.corrected, a.f0), 0.25);
+  }
+  const v = a && a.view, gc = a && a.gcis;
+  scope(flowCv, a && a.flow, v, { color: cssVar("--curve"), fill: true, gcis: gc, width: 2.2 });
+  scope(derivCv, a && a.deriv, v, { color: cssVar("--h1"), center: true, gcis: gc, width: 1.6 });
+  scope(inputCv, a && a.src, v, { color: cssVar("--hn"), center: true, width: 1.4 });
+  drawSpec(a);
+  updateReadout(a);
+}
+function updateReadout(a) {
+  $("r-src").textContent = state.src === "demo" ? "Demo" : state.src === "mic" ? "Mic" : "File";
+  $("r-srcs").textContent = state.running ? (state.src === "demo" ? noteOf(state.demoPitch) + " [" + state.demoVowel + "]" : "running") : "not started";
+  if (a && a.f0 && a.conf > 0.5) { $("r-f0").textContent = noteOf(a.f0); $("r-f0hz").textContent = Math.round(a.f0) + " Hz"; }
+  else { $("r-f0").textContent = "–"; $("r-f0hz").textContent = a ? "no steady pitch" : " "; }
+  if (a) {
+    const db = 20 * Math.log10(a.level + 1e-9);
+    $("r-lvl").textContent = a.level > 0.98 ? "Clipping" : Math.round(db) + " dB";
+    $("r-lvls").textContent = a.level > 0.98 ? "back off or lower gain" : db < -40 ? "too quiet, move closer" : "good";
+    $("r-flat").textContent = a.ripple == null ? "–" : Math.round(a.ripple * 100) + "%";
+  } else { $("r-lvl").textContent = "–"; $("r-lvls").textContent = " "; $("r-flat").textContent = "–"; }
+}
+function updateLabels() {
+  $("r-mode").textContent = state.frozen ? "Frozen" : "Live";
+  $("r-modes").textContent = state.frozen ? "adjust the filter on held cycles" : state.running ? "updating as you sing" : " ";
+  $("freeze").setAttribute("aria-pressed", String(state.frozen));
+  $("freeze").textContent = state.frozen ? "Unfreeze" : "Freeze";
+}
+function loop() {
+  if (state.running && !state.frozen) render();
+  else if (needsDraw) render();
+  needsDraw = false;
+  requestAnimationFrame(loop);
+}
+
+/* ===================== Controls ===================== */
+const frList = $("fr-list");
+FR_DEF.forEach((d, i) => {
+  const box = document.createElement("div"); box.className = "fr";
+  box.innerHTML = `
+    <div class="fr-head"><label class="check"><input type="checkbox" id="on${i}" checked> <b>fR${i + 1}</b></label><output id="fo${i}"></output></div>
+    <input type="range" id="f${i}" min="${d.lo}" max="${d.hi}" step="5" aria-label="fR${i + 1} frequency">
+    <div class="fr-bw"><span class="note">width</span><input type="range" id="b${i}" min="30" max="500" step="5" aria-label="fR${i + 1} bandwidth"><output id="bo${i}"></output></div>`;
+  frList.appendChild(box);
+  $("on" + i).addEventListener("change", (e) => { state.fr[i].on = e.target.checked; syncSliders(); needsDraw = true; });
+  $("f" + i).addEventListener("input", (e) => { state.fr[i].f = parseFloat(e.target.value); syncSliders(); needsDraw = true; });
+  $("b" + i).addEventListener("input", (e) => { state.fr[i].bw = parseFloat(e.target.value); syncSliders(); needsDraw = true; });
+});
+function syncSliders() {
+  state.fr.forEach((r, i) => {
+    $("on" + i).checked = r.on; $("f" + i).value = r.f; $("b" + i).value = r.bw;
+    $("fo" + i).textContent = Math.round(r.f) + " Hz";
+    $("bo" + i).textContent = Math.round(r.bw) + " Hz";
+  });
+  needsDraw = true;
+}
+function setFrozen(on) {
+  state.frozen = on && state.running;
+  frozenBuf = state.frozen ? lastSamples(Math.round(fs * 0.3)) : null;
+  updateLabels(); needsDraw = true;
+}
+$("freeze").addEventListener("click", () => setFrozen(!state.frozen));
+function autoNow() {
+  const a = last || analyze();
+  if (!a || !a.f0) { statusEl.textContent = "I need a steady pitched sound to estimate from. Start the input, or freeze on a steady vowel."; return; }
+  statusEl.textContent = "";
+  // polarity: the closure spike in the flow derivative should point down
+  let mx = 0, mn = 0;
+  for (let i = a.deriv.length - Math.round(fs * 0.05); i < a.deriv.length; i++) { mx = Math.max(mx, a.deriv[i]); mn = Math.min(mn, a.deriv[i]); }
+  if (mx > 1.6 * -mn) { state.invert = !state.invert; $("invert").checked = state.invert; }
+  const est = estimate(a.corrected, a.f0);
+  if (est.length) applyEstimate(est, 1);
+  refine(a);
+  needsDraw = true;
+}
+// fine-tune the way a person would: nudge each resonance until the closed phase is as flat as it gets
+function refine(a0) {
+  const a = analyze();
+  if (!a || !a.gcis || !a.f0) return;
+  const T = fs / a.f0, start = Math.max(0, Math.round(a.view[0] - 2 * T - 200));
+  const buf = a.src.subarray(start), gcis = a.gcis.map((g) => g - start), s0 = a.view[0] - start, s1 = a.view[1] - start;
+  const score = () => { const r = inverseFilter(buf); removeBaseline(r.flow, T); const v = closedRipple(r.flow, gcis, T, s0, s1); return v == null ? 9 : v; };
+  let best = score(), evals = 0;
+  let fStep = 0.04, bStep = 0.3;
+  for (let round = 0; round < 4 && evals < 260; round++) {
+    let improved = true;
+    while (improved && evals < 260) {
+      improved = false;
+      state.fr.forEach((r, i) => {
+        if (!r.on) return;
+        const d = FR_DEF[i];
+        for (const [key, mult] of [["f", 1 + fStep], ["f", 1 - fStep], ["bw", 1 + bStep], ["bw", 1 / (1 + bStep)]]) {
+          const old = r[key], nv = key === "f" ? Math.max(d.lo, Math.min(d.hi, old * mult)) : Math.max(30, Math.min(500, old * mult));
+          if (nv === old) continue;
+          r[key] = nv; const sc = score(); evals++;
+          if (sc < best - 1e-4) { best = sc; improved = true; } else r[key] = old;
+        }
+      });
+    }
+    fStep /= 2; bStep /= 2;
+  }
+  syncSliders();
+}
+$("auto").addEventListener("click", autoNow);
+$("track").addEventListener("change", (e) => { state.track = e.target.checked; });
+$("lfc").addEventListener("input", (e) => { state.lfc = parseFloat(e.target.value); $("lfc-out").textContent = state.lfc ? state.lfc + " Hz" : "Off"; needsDraw = true; });
+$("cycles").addEventListener("input", (e) => { state.cycles = parseInt(e.target.value, 10); $("cycles-out").textContent = state.cycles; needsDraw = true; });
+$("invert").addEventListener("change", (e) => { state.invert = e.target.checked; needsDraw = true; });
+$("monitor").addEventListener("change", (e) => { state.monitor = e.target.checked; if (monGain) monGain.gain.value = state.monitor ? 0.8 : 0; });
+$("show-true").addEventListener("change", (e) => { state.showTrue = e.target.checked; needsDraw = true; });
+const pitchSel = $("demo-pitch");
+DEMO_PITCHES.forEach(([n, hz]) => { const o = document.createElement("option"); o.value = hz; o.textContent = n; pitchSel.appendChild(o); });
+async function demoChanged() { if (state.running && state.src === "demo") await setRunning(true); else { makeTrueOnly(); needsDraw = true; } }
+function makeTrueOnly() {
+  const V = DEMO_VOWELS[state.demoPitch >= 300 ? "treble" : "low"], v = V[state.demoVowel];
+  demoTrue = [v[0], v[1], V.hi[0], V.hi[1], V.hi[2]].map((f, i) => ({ f, bw: DEMO_BW[i] }));
+}
+pitchSel.addEventListener("change", (e) => { state.demoPitch = parseFloat(e.target.value); demoChanged(); });
+$("demo-vowel").addEventListener("change", (e) => { state.demoVowel = e.target.value; demoChanged(); });
+document.querySelectorAll("[data-src]").forEach((b) => b.addEventListener("click", async () => {
+  state.src = b.dataset.src;
+  document.querySelectorAll("[data-src]").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  $("demo-ctl").hidden = state.src !== "demo"; $("file-ctl").hidden = state.src !== "file"; $("mic-ctl").hidden = state.src !== "mic";
+  $("monitor-wrap").hidden = state.src === "mic"; $("leg-true").hidden = state.src !== "demo";
+  statusEl.textContent = "";
+  if (state.running) await setRunning(true); else { updateReadout(null); needsDraw = true; }
+}));
+$("file").addEventListener("change", async (e) => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  try {
+    await ensureCtx();
+    const arr = await f.arrayBuffer();
+    fileBuffer = await ctx.decodeAudioData(arr);
+    statusEl.textContent = "Loaded " + f.name + ". Press Start.";
+    if (state.running) await setRunning(true);
+  } catch (err) { statusEl.textContent = "That file couldn't be read. Try a WAV or MP3."; }
+});
+document.addEventListener("keydown", (e) => {
+  const t = e.target;
+  if (t.tagName === "SELECT" || (t.tagName === "INPUT" && t.type !== "range" && t.type !== "checkbox")) return;
+  if (e.code === "Space") { e.preventDefault(); setFrozen(!state.frozen); }
+  else if (e.key === "a" || e.key === "A") autoNow();
+});
+
+/* drag handles on the spectrum */
+let drag = null;
+specCv.addEventListener("pointerdown", (e) => {
+  if (!specGeom) return;
+  const rect = specCv.getBoundingClientRect(), x = e.clientX - rect.left, y = e.clientY - rect.top;
+  let best = -1, bd = 14;
+  state.fr.forEach((r, i) => { const d = Math.abs(specGeom.X(r.f) - x); if (d < bd) { bd = d; best = i; } });
+  if (best < 0) return;
+  drag = { i: best, y0: y, bw0: state.fr[best].bw };
+  specCv.setPointerCapture(e.pointerId);
+});
+specCv.addEventListener("pointermove", (e) => {
+  const rect = specCv.getBoundingClientRect(), x = e.clientX - rect.left, y = e.clientY - rect.top;
+  if (!drag) {
+    if (!specGeom) return;
+    const near = state.fr.some((r) => Math.abs(specGeom.X(r.f) - x) < 14);
+    specCv.style.cursor = near ? "grab" : "default"; return;
+  }
+  const r = state.fr[drag.i], d = FR_DEF[drag.i];
+  r.f = Math.max(d.lo, Math.min(d.hi, specGeom.F(x)));
+  r.bw = Math.max(30, Math.min(500, drag.bw0 * Math.pow(2, (y - drag.y0) / 50)));
+  syncSliders();
+});
+const endDrag = () => { drag = null; };
+specCv.addEventListener("pointerup", endDrag); specCv.addEventListener("pointercancel", endDrag);
+
+new ResizeObserver(() => { needsDraw = true; }).observe(flowCv);
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { needsDraw = true; });
+makeTrueOnly();
+syncSliders();
+updateLabels();
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
