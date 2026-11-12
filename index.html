@@ -267,9 +267,16 @@ details .field { margin-top: 8px; }
         <p class="note">Most mics and interfaces roll off the lowest frequencies, which makes the closed phase tilt or sag. Raise this until the closed phase is level. Leave it off for the demo.</p>
       </div>
       <div class="field">
+        <div class="lab"><label for="lp">Smoothing (low-pass)</label><output id="lp-out" for="lp">4000 Hz</output></div>
+        <input type="range" id="lp" min="2000" max="6000" step="100" value="4000">
+        <p class="note">Inverse filtering boosts everything above the resonances, including hiss and room noise. This cuts the result off above the chosen frequency. Lower it if the flow is covered in fast fuzz.</p>
+      </div>
+      <div class="field">
         <div class="lab"><label for="cycles">Cycles shown</label><output id="cycles-out" for="cycles">3</output></div>
         <input type="range" id="cycles" min="2" max="6" step="1" value="3">
       </div>
+      <label class="check"><input type="checkbox" id="avg" checked> Average cycles to cut noise</label>
+      <p class="note">Lines up the last several cycles and averages them, so hiss and room noise drop out and the repeating voice stays. Turn it off to see single cycles, wobbles and all.</p>
       <label class="check"><input type="checkbox" id="invert"> Flip polarity (if the closure spike points up)</label>
       <p class="keys"><kbd>Space</kbd> freeze or unfreeze · <kbd>A</kbd> auto estimate</p>
     </aside>
@@ -459,7 +466,7 @@ const state = {
   src: "demo", running: false, frozen: false, monitor: true,
   fr: FR_DEF.map((d) => ({ f: d.f, bw: d.bw, on: true })),
   lfc: 0, cycles: 3, invert: false, leak: 4, track: false,
-  demoPitch: 110, leakPeriods: 1, lp: 5000, demoVowel: "a", showTrue: true
+  demoPitch: 110, leakPeriods: 1, lp: 4000, avg: true, demoVowel: "a", showTrue: true
 };
 const DEMO_VOWELS = {
   low:    { a: [720, 1100], i: [280, 2250], u: [310, 820], e: [400, 2000], o: [460, 820], hi: [2550, 3400, 4200] },
@@ -706,7 +713,7 @@ function estimate(x, f0) {
   for (const [re, im] of polyRoots(a)) {
     if (im <= 0) continue;
     const mag = Math.hypot(re, im), f = Math.atan2(im, re) * rate / (2 * Math.PI), bw = -Math.log(mag) * rate / Math.PI;
-    if (f > 150 && f < rate / 2 - 150 && bw > 0 && bw < 600) found.push({ f, bw: Math.max(30, Math.min(400, bw)) });
+    if (f > 150 && f < rate / 2 - 150 && bw > 0 && bw < 600) found.push({ f, bw: Math.max(50, Math.min(400, bw)) });
   }
   found.sort((u, v) => u.f - v.f);
   return found.slice(0, 5);
@@ -747,15 +754,56 @@ function closedRipple(flow, gcis, T, s0, s1) {
   }
   return cnt ? rip / cnt / (hi - lo) : null;
 }
+// Line up the most recent cycles and average them. Whatever repeats every cycle (the voice) stays;
+// hiss and room noise, which don't repeat, shrink. The averaged cycle is then repeated to fill the buffer.
+function periodicAverage(x, T, maxCycles) {
+  const L = Math.round(T), n = x.length, sh = Math.max(2, Math.round(0.15 * T));
+  if (n < 4 * L) return null;
+  const r0 = n - L - sh - 1;
+  const segStarts = (tpl) => {
+    const starts = [];
+    for (let k = 0; k < maxCycles; k++) {
+      const c = Math.round(r0 - k * T);
+      if (c - sh < 0) break;
+      let best = c, bv = -Infinity;
+      for (let d = -sh; d <= sh; d++) { let v = 0; const o = c + d; for (let i = 0; i < L; i += 2) v += tpl[i] * x[o + i]; if (v > bv) { bv = v; best = o; } }
+      starts.push(best);
+    }
+    return starts;
+  };
+  let tpl = x.subarray(r0, r0 + L), avg = null, used = 0;
+  for (let pass = 0; pass < 2; pass++) {
+    const st = segStarts(tpl);
+    avg = new Float64Array(L);
+    st.forEach((o) => { for (let i = 0; i < L; i++) avg[i] += x[o + i]; });
+    for (let i = 0; i < L; i++) avg[i] /= st.length;
+    tpl = avg; used = st.length;
+  }
+  // smooth the seam so the repeated cycle joins cleanly
+  const y = new Float64Array(n), w = Math.min(16, L >> 3), jump = avg[0] - avg[L - 1];
+  const cyc = Float64Array.from(avg);
+  for (let i = 0; i < w; i++) cyc[L - w + i] += jump * (i + 1) / (w + 1);
+  for (let i = 0; i < n; i++) y[i] = cyc[(i + (L - (n % L))) % L];
+  return { y, used };
+}
+let avgCache = null;
 function analyze() {
-  const src = state.frozen && frozenBuf ? frozenBuf : lastSamples(Math.round(fs * 0.3));
-  if (src.length < fs * 0.1) return null;
-  const { corrected, deriv, flow } = inverseFilter(src);
+  const raw = state.frozen && frozenBuf ? frozenBuf : lastSamples(Math.round(fs * 0.3));
+  if (raw.length < fs * 0.1) return null;
   const D = Math.max(1, Math.floor(fs / 11000));
-  const pd = pitchOf(decimate(corrected, D), fs / D);
+  const pd = pitchOf(decimate(raw, D), fs / D);
+  let src = raw, averaged = 0;
+  if (state.avg && pd.f0 > 0 && pd.conf > 0.5) {
+    if (state.frozen && avgCache && avgCache.buf === raw) { src = avgCache.y; averaged = avgCache.used; }
+    else {
+      const r = periodicAverage(raw, fs / pd.f0, state.frozen ? 24 : 12);
+      if (r) { src = r.y; averaged = r.used; if (state.frozen) avgCache = { buf: raw, y: r.y, used: r.used }; }
+    }
+  }
+  const { corrected, deriv, flow } = inverseFilter(src);
   if (pd.f0 > 0 && pd.conf > 0.5) removeBaseline(flow, fs / pd.f0);
-  let level = 0; for (let i = src.length - Math.round(fs * 0.05); i < src.length; i++) level = Math.max(level, Math.abs(src[i]));
-  const out = { src, corrected, deriv, flow, f0: pd.f0, conf: pd.conf, level };
+  let level = 0; for (let i = raw.length - Math.round(fs * 0.05); i < raw.length; i++) level = Math.max(level, Math.abs(raw[i]));
+  const out = { src, corrected, deriv, flow, f0: pd.f0, conf: pd.conf, level, averaged };
   if (pd.f0 > 0 && pd.conf > 0.5) {
     const T = fs / pd.f0, n = src.length, pad = Math.round(0.02 * fs);
     let g = -1, gv = Infinity;
@@ -867,6 +915,11 @@ function drawSpec(a) {
     g.strokeStyle = col; g.lineWidth = wid; g.stroke();
   };
   if (a) { line(a.specIn, cssVar("--hn"), 1.2); line(a.specOut, cssVar("--h1"), 1.6); }
+  if (state.lp < FMAX) {
+    const xl = X(state.lp);
+    g.globalAlpha = 0.35; g.fillStyle = "#000"; g.fillRect(xl, padT, padL + pw - xl, ph); g.globalAlpha = 1;
+    g.fillStyle = ink; g.textAlign = "left"; g.textBaseline = "top"; g.fillText("smoothed off", xl + 4, padT + 4);
+  }
   // the resonance model being removed
   let cmax = -Infinity; const cv = [];
   for (let px = 0; px <= pw; px++) { const v = tractDB(Math.max(1, px / pw * FMAX)); cv.push(v); cmax = Math.max(cmax, v); }
@@ -906,6 +959,7 @@ function render() {
   scope(inputCv, a && a.src, v, { color: cssVar("--hn"), center: true, width: 1.4 });
   drawSpec(a);
   updateReadout(a);
+  updateLabels();
 }
 function updateReadout(a) {
   $("r-src").textContent = state.src === "demo" ? "Demo" : state.src === "mic" ? "Mic" : "File";
@@ -921,7 +975,7 @@ function updateReadout(a) {
 }
 function updateLabels() {
   $("r-mode").textContent = state.frozen ? "Frozen" : "Live";
-  $("r-modes").textContent = state.frozen ? "adjust the filter on held cycles" : state.running ? "updating as you sing" : " ";
+  $("r-modes").textContent = (state.frozen ? "held" : state.running ? "updating" : " ") + (last && last.averaged ? " · " + last.averaged + " cycles averaged" : "");
   $("freeze").setAttribute("aria-pressed", String(state.frozen));
   $("freeze").textContent = state.frozen ? "Unfreeze" : "Freeze";
 }
@@ -963,19 +1017,44 @@ function autoNow() {
   const a = last || analyze();
   if (!a || !a.f0) { statusEl.textContent = "I need a steady pitched sound to estimate from. Start the input, or freeze on a steady vowel."; return; }
   statusEl.textContent = "";
-  // polarity: the closure spike in the flow derivative should point down
-  let mx = 0, mn = 0;
-  for (let i = a.deriv.length - Math.round(fs * 0.05); i < a.deriv.length; i++) { mx = Math.max(mx, a.deriv[i]); mn = Math.min(mn, a.deriv[i]); }
-  if (mx > 1.6 * -mn) { state.invert = !state.invert; $("invert").checked = state.invert; }
   const est = estimate(a.corrected, a.f0);
   if (est.length) applyEstimate(est, 1);
+  coarseSearch(a);
   refine(a);
+  // keep them in order, lowest to highest
+  const fs5 = state.fr.map((r) => r.f).sort((x, y) => x - y);
+  state.fr.forEach((r, i) => { r.f = Math.max(FR_DEF[i].lo, Math.min(FR_DEF[i].hi, fs5[i])); });
+  syncSliders();
   needsDraw = true;
+}
+// LPC often puts fR2 and fR3 in the wrong place on real voices, so try a coarse grid of fR2/fR3 pairs first
+function coarseSearch(a0) {
+  const a = analyze();
+  if (!a || !a.gcis || !a.f0) return;
+  const T = fs / a.f0, start = Math.max(0, Math.round(a.view[0] - 2 * T - 200));
+  const buf = a.src.subarray(start), gcis = a.gcis.map((g) => g - start), s0 = a.view[0] - start, s1 = a.view[1] - start;
+  const score = () => { const r = inverseFilter(buf); removeBaseline(r.flow, T); const v = closedRipple(r.flow, gcis, T, s0, s1); return v == null ? 9 : v; };
+  const r1 = state.fr[0], r2 = state.fr[1], r3 = state.fr[2], r4 = state.fr[3];
+  const saved = state.fr.map((r) => ({ ...r }));
+  let best = score(), bestSet = saved;
+  const f1c = r1.f, f1s = [0.85, 0.92, 1, 1.08, 1.17].map((m) => f1c * m).filter((f) => f >= FR_DEF[0].lo && f <= FR_DEF[0].hi);
+  const f3s = []; for (let f = 1600; f <= 3600; f *= 1.07) f3s.push(f);
+  r1.bw = 90; r2.bw = 160; r3.bw = 200;
+  for (const f1 of f1s) {
+    r1.f = f1;
+    for (let f2 = Math.max(FR_DEF[1].lo, f1 * 1.4); f2 <= 2800; f2 *= 1.07) for (const f3 of f3s) {
+      if (f3 < f2 * 1.1 || f3 > r4.f / 1.05) continue;
+      r2.f = f2; r3.f = f3;
+      const sc = score();
+      if (sc < best) { best = sc; bestSet = state.fr.map((r) => ({ ...r })); }
+    }
+  }
+  state.fr = bestSet.map((r) => ({ ...r }));
 }
 // fine-tune the way a person would: nudge each resonance until the closed phase is as flat as it gets
 function refine(a0) {
   const a = analyze();
-  if (!a || !a.gcis || !a.f0) return;
+  if (!a || !a.gcis || !a.f0) return Infinity;
   const T = fs / a.f0, start = Math.max(0, Math.round(a.view[0] - 2 * T - 200));
   const buf = a.src.subarray(start), gcis = a.gcis.map((g) => g - start), s0 = a.view[0] - start, s1 = a.view[1] - start;
   const score = () => { const r = inverseFilter(buf); removeBaseline(r.flow, T); const v = closedRipple(r.flow, gcis, T, s0, s1); return v == null ? 9 : v; };
@@ -991,6 +1070,10 @@ function refine(a0) {
         for (const [key, mult] of [["f", 1 + fStep], ["f", 1 - fStep], ["bw", 1 + bStep], ["bw", 1 / (1 + bStep)]]) {
           const old = r[key], nv = key === "f" ? Math.max(d.lo, Math.min(d.hi, old * mult)) : Math.max(30, Math.min(500, old * mult));
           if (nv === old) continue;
+          if (key === "f") {
+            const below = state.fr.slice(0, i).filter((q) => q.on).pop(), above = state.fr.slice(i + 1).find((q) => q.on);
+            if ((below && nv < below.f * 1.08) || (above && nv > above.f / 1.08)) continue;
+          }
           r[key] = nv; const sc = score(); evals++;
           if (sc < best - 1e-4) { best = sc; improved = true; } else r[key] = old;
         }
@@ -999,10 +1082,13 @@ function refine(a0) {
     fStep /= 2; bStep /= 2;
   }
   syncSliders();
+  return best;
 }
 $("auto").addEventListener("click", autoNow);
 $("track").addEventListener("change", (e) => { state.track = e.target.checked; });
 $("lfc").addEventListener("input", (e) => { state.lfc = parseFloat(e.target.value); $("lfc-out").textContent = state.lfc ? state.lfc + " Hz" : "Off"; needsDraw = true; });
+$("avg").addEventListener("change", (e) => { state.avg = e.target.checked; avgCache = null; needsDraw = true; });
+$("lp").addEventListener("input", (e) => { state.lp = parseFloat(e.target.value); $("lp-out").textContent = state.lp + " Hz"; needsDraw = true; });
 $("cycles").addEventListener("input", (e) => { state.cycles = parseInt(e.target.value, 10); $("cycles-out").textContent = state.cycles; needsDraw = true; });
 $("invert").addEventListener("change", (e) => { state.invert = e.target.checked; needsDraw = true; });
 $("monitor").addEventListener("change", (e) => { state.monitor = e.target.checked; if (monGain) monGain.gain.value = state.monitor ? 0.8 : 0; });
