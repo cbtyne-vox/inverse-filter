@@ -258,6 +258,7 @@ details .field { margin-top: 8px; }
         <button type="button" id="auto">Auto estimate</button>
         <label class="check"><input type="checkbox" id="track"> Keep estimating</label>
       </div>
+      <p class="note" id="hi-note" hidden>At this pitch, fR1 and fR2 can't be measured reliably, by hand or by Auto. The harmonics are too far apart to show where the resonances are, so the estimate tends to land on a harmonic instead.</p>
 
       <div id="fr-list"></div>
 
@@ -269,7 +270,7 @@ details .field { margin-top: 8px; }
       <div class="field">
         <div class="lab"><label for="lp">Smoothing (low-pass)</label><output id="lp-out" for="lp">4000 Hz</output></div>
         <input type="range" id="lp" min="2000" max="6000" step="100" value="4000">
-        <p class="note">Inverse filtering boosts everything above the resonances, including hiss and room noise. This cuts the result off above the chosen frequency. Lower it if the flow is covered in fast fuzz.</p>
+        <p class="note">Inverse filtering boosts everything above the resonances, including hiss and room noise. This cuts the result off above the chosen frequency. Lower it if the flow is covered in fast fuzz. On a real voice, Auto sets this to 3500 Hz (or a little above fR4 if fR4 is high), since nothing above that is being removed.</p>
       </div>
       <div class="field">
         <div class="lab"><label for="cycles">Cycles shown</label><output id="cycles-out" for="cycles">3</output></div>
@@ -284,7 +285,7 @@ details .field { margin-top: 8px; }
 
   <section class="panel" aria-label="About">
     <h2>About</h2>
-    <p class="note">Inverse Filter Lab was made by Chadley Ballantyne (Stetson University) as a companion to the Vowel Synth Lab, in the tradition of Sopran and the interactive inverse filtering pioneered by Svante Granqvist. Each resonance is removed with a second-order anti-resonance filter, and the result is integrated to estimate the glottal flow. The automatic estimate uses linear prediction after a first-pass removal of the glottal tilt, a simplified version of iterative adaptive inverse filtering (IAIF). The demo voice is the same Liljencrants-Fant source and five resonances as the Vowel Synth Lab. Built with Claude.</p>
+    <p class="note">Inverse Filter Lab was made by Chadley Ballantyne (Stetson University) as a companion to the Vowel Synth Lab, in the tradition of Sopran and the interactive inverse filtering pioneered by Svante Granqvist. Each resonance is removed with a second-order anti-resonance filter, and the result is integrated to estimate the glottal flow. The automatic estimate uses closed-phase covariance analysis: it finds each glottal closure, fits a linear predictor only to the stretches of each cycle when the folds are closed and the tract is ringing on its own, tries several closed-phase windows, and keeps the one that leaves the flattest closed phase. If no clear closures can be found, it falls back to linear prediction after a first-pass removal of the glottal tilt (a simplified IAIF) and a search that flattens the closed phase. The demo voice is the same Liljencrants-Fant source and five resonances as the Vowel Synth Lab. Built with Claude.</p>
   </section>
 </div>
 
@@ -729,6 +730,93 @@ function applyEstimate(est, blend) {
   syncSliders();
 }
 
+/* ===================== Closed-phase covariance analysis ===================== */
+// While the folds are closed, the tract rings freely with no new input from the source, so a linear
+// predictor fitted only to those stretches describes the tract alone. We find each closure from the
+// LPC residual, then fit one covariance-method predictor to the closed stretch of every cycle together.
+function findClosures(d, T) {
+  const a = lpc(hann(d.map((v, i) => (i ? v - d[i - 1] : 0))), 14), res = applyFIR(d, a), L = Math.round(T);
+  // the stronger set of residual peaks marks the closures; this also works if the input polarity is flipped
+  const mins = [], maxs = [];
+  for (let s = 20; s + L < res.length; s += L) { let mn = Infinity, mx = -Infinity; for (let i = s; i < s + L; i++) { mn = Math.min(mn, res[i]); mx = Math.max(mx, res[i]); } mins.push(-mn); maxs.push(mx); }
+  const med = (v) => v.slice().sort((x, y) => x - y)[v.length >> 1] || 0;
+  const sgn = med(mins) >= med(maxs) ? -1 : 1, q = Math.round(T / 4);
+  const g = []; let i = -1, bv = -Infinity;
+  for (let k = 20; k < 20 + L && k < res.length; k++) if (sgn * res[k] > bv) { bv = sgn * res[k]; i = k; }
+  while (i >= 0 && i + T + q < res.length) {
+    g.push(i);
+    const c = Math.round(i + T); let bi = -1; bv = -Infinity;
+    for (let k = c - q; k <= c + q; k++) if (sgn * res[k] > bv) { bv = sgn * res[k]; bi = k; }
+    i = bi;
+  }
+  return g;
+}
+function covLPC(x, segs, p) {
+  const Phi = Array.from({ length: p }, () => new Float64Array(p)), psi = new Float64Array(p);
+  let rows = 0;
+  for (const [a, b] of segs) for (let n = Math.max(a, p); n < b && n < x.length; n++) {
+    rows++;
+    for (let j = 0; j < p; j++) { const vj = x[n - 1 - j]; psi[j] += vj * x[n]; for (let k = 0; k <= j; k++) Phi[j][k] += vj * x[n - 1 - k]; }
+  }
+  if (rows < 3 * p) return null;
+  let tr = 0; for (let j = 0; j < p; j++) tr += Phi[j][j];
+  for (let j = 0; j < p; j++) { for (let k = 0; k < j; k++) Phi[k][j] = Phi[j][k]; Phi[j][j] += 1e-7 * tr / p; }
+  // Cholesky solve
+  const Lm = Array.from({ length: p }, () => new Float64Array(p));
+  for (let j = 0; j < p; j++) {
+    let s = Phi[j][j]; for (let k = 0; k < j; k++) s -= Lm[j][k] * Lm[j][k];
+    if (!(s > 0)) return null; Lm[j][j] = Math.sqrt(s);
+    for (let i = j + 1; i < p; i++) { let t = Phi[i][j]; for (let k = 0; k < j; k++) t -= Lm[i][k] * Lm[j][k]; Lm[i][j] = t / Lm[j][j]; }
+  }
+  const y = new Float64Array(p), c = new Float64Array(p);
+  for (let i = 0; i < p; i++) { let s = psi[i]; for (let k = 0; k < i; k++) s -= Lm[i][k] * y[k]; y[i] = s / Lm[i][i]; }
+  for (let i = p - 1; i >= 0; i--) { let s = y[i]; for (let k = i + 1; k < p; k++) s -= Lm[k][i] * c[k]; c[i] = s / Lm[i][i]; }
+  const a = new Float64Array(p + 1); a[0] = 1; for (let i = 0; i < p; i++) a[i + 1] = -c[i];
+  return a;
+}
+// Fit the closed phases of every cycle in the window, for several choices of where the closed phase
+// starts and how long it lasts. Each choice gives one candidate set of resonances.
+function cpCandidates(x, f0, starts = CP_STARTS_MS, lens = CP_LENS) {
+  const D = Math.max(1, Math.floor(fs / 11000)), rate = fs / D;
+  const d = decimate(x, D);
+  let mean = 0; for (const v of d) mean += v; mean /= d.length;
+  for (let i = 0; i < d.length; i++) d[i] -= mean;
+  const T = rate / f0, g = findClosures(d, T);
+  if (g.length < 6) return [];
+  const p = Math.round(rate / 1000) + 2, out = [];
+  for (const ms of starts) for (const frac of lens) {
+    // the closure itself is smeared over a few tenths of a millisecond, so the fit starts a little after it
+    const s0 = Math.max(1, Math.round(0.04 * T), Math.round(ms * rate / 1000)), len = Math.max(4, Math.round(frac * T));
+    if (s0 + len > 0.75 * T) continue;
+    const a = covLPC(d, g.map((gi) => [gi + s0, gi + s0 + len]).filter(([, b]) => b < d.length), p);
+    if (!a) continue;
+    const found = [];
+    for (const [re, im] of polyRoots(a)) {
+      if (im <= 0) continue;
+      let mag = Math.hypot(re, im); if (mag > 1) mag = 1 / mag; // an unstable root is reflected inside the unit circle
+      const f = Math.atan2(im, re) * rate / (2 * Math.PI), bw = -Math.log(mag) * rate / Math.PI;
+      if (f > 150 && f < rate / 2 - 150) found.push({ f, bw });
+    }
+    found.sort((u, v) => u.f - v.f);
+    const est = assignResonances(found);
+    if (est.length >= 3) out.push(est);
+  }
+  return out;
+}
+const CP_STARTS_MS = [0, 0.3, 0.5, 0.8, 1.1], CP_LENS = [0.25, 0.35];
+// hand the resonances to fR1..fR5 in order, skipping anything too wide to be a resonance
+function assignResonances(found) {
+  const out = []; let prev = 0;
+  const cands = found.filter((r) => r.bw < 700);
+  for (const r of cands) {
+    const i = out.length; if (i >= 5) break;
+    if (r.f < FR_DEF[i].lo || r.f < prev * 1.05) continue;
+    if (r.f > FR_DEF[i].hi) continue;
+    out.push({ f: r.f, bw: Math.max(30, Math.min(500, r.bw)) }); prev = r.f;
+  }
+  return out;
+}
+
 /* ===================== Analysis of the current window ===================== */
 let last = null;
 // subtract a running mean one period long: for a periodic signal it is constant, so the flow shape is untouched
@@ -757,9 +845,9 @@ function closedRipple(flow, gcis, T, s0, s1) {
 // Line up the most recent cycles and average them. Whatever repeats every cycle (the voice) stays;
 // hiss and room noise, which don't repeat, shrink. The averaged cycle is then repeated to fill the buffer.
 function periodicAverage(x, T, maxCycles) {
-  const L = Math.round(T), n = x.length, sh = Math.max(2, Math.round(0.15 * T));
-  if (n < 4 * L) return null;
-  const r0 = n - L - sh - 1;
+  const L = Math.round(T), n = x.length, sh = Math.max(2, Math.round(0.15 * T)), W = Math.max(8, Math.round(0.2 * L)), LW = L + W;
+  if (n < 4 * L + W) return null;
+  const r0 = n - LW - sh - 1;
   const segStarts = (tpl) => {
     const starts = [];
     for (let k = 0; k < maxCycles; k++) {
@@ -774,15 +862,16 @@ function periodicAverage(x, T, maxCycles) {
   let tpl = x.subarray(r0, r0 + L), avg = null, used = 0;
   for (let pass = 0; pass < 2; pass++) {
     const st = segStarts(tpl);
-    avg = new Float64Array(L);
-    st.forEach((o) => { for (let i = 0; i < L; i++) avg[i] += x[o + i]; });
-    for (let i = 0; i < L; i++) avg[i] /= st.length;
+    avg = new Float64Array(LW);
+    st.forEach((o) => { for (let i = 0; i < LW; i++) avg[i] += x[o + i]; });
+    for (let i = 0; i < LW; i++) avg[i] /= st.length;
     tpl = avg; used = st.length;
   }
-  // smooth the seam so the repeated cycle joins cleanly
-  const y = new Float64Array(n), w = Math.min(16, L >> 3), jump = avg[0] - avg[L - 1];
-  const cyc = Float64Array.from(avg);
-  for (let i = 0; i < w; i++) cyc[L - w + i] += jump * (i + 1) / (w + 1);
+  // join the repeated cycle without a seam: the averaged stretch runs a little past one period,
+  // so the start of each repeat is crossfaded from that continuation into the cycle's own start
+  const cyc = avg.slice(0, L);
+  for (let i = 0; i < W; i++) { const w = 0.5 - 0.5 * Math.cos(Math.PI * (i + 0.5) / W); cyc[i] = w * avg[i] + (1 - w) * avg[L + i]; }
+  const y = new Float64Array(n);
   for (let i = 0; i < n; i++) y[i] = cyc[(i + (L - (n % L))) % L];
   return { y, used };
 }
@@ -803,7 +892,7 @@ function analyze() {
   const { corrected, deriv, flow } = inverseFilter(src);
   if (pd.f0 > 0 && pd.conf > 0.5) removeBaseline(flow, fs / pd.f0);
   let level = 0; for (let i = raw.length - Math.round(fs * 0.05); i < raw.length; i++) level = Math.max(level, Math.abs(raw[i]));
-  const out = { src, corrected, deriv, flow, f0: pd.f0, conf: pd.conf, level, averaged };
+  const out = { raw, src, corrected, deriv, flow, f0: pd.f0, conf: pd.conf, level, averaged };
   if (pd.f0 > 0 && pd.conf > 0.5) {
     const T = fs / pd.f0, n = src.length, pad = Math.round(0.02 * fs);
     let g = -1, gv = Infinity;
@@ -943,7 +1032,7 @@ function drawSpec(a) {
     g.globalAlpha = 1; g.font = "11px " + cssVar("--font-mono");
   });
 }
-let needsDraw = true;
+let needsDraw = true, trackTick = 0;
 function render() {
   const a = analyze();
   last = a;
@@ -951,7 +1040,11 @@ function render() {
     const n = a.src.length, seg = Math.min(n, Math.round(fs * 0.17));
     a.specIn = specDB(a.corrected.subarray(n - seg));
     a.specOut = specDB(a.deriv.subarray(n - seg));
-    if (state.track && !state.frozen && a.f0 && a.conf > 0.6) applyEstimate(estimate(a.corrected, a.f0), 0.25);
+    if (state.track && !state.frozen && a.f0 && a.conf > 0.6 && (trackTick++ % 4) === 0) {
+      // one closed-phase fit per few frames, eased in so the handles don't jump around
+      const c = cpCandidates(a.raw, a.f0, [0.5], [0.3]);
+      applyEstimate(c.length ? c[0] : estimate(a.corrected, a.f0), 0.35);
+    }
   }
   const v = a && a.view, gc = a && a.gcis;
   scope(flowCv, a && a.flow, v, { color: cssVar("--curve"), fill: true, gcis: gc, width: 2.2 });
@@ -964,6 +1057,7 @@ function render() {
 function updateReadout(a) {
   $("r-src").textContent = state.src === "demo" ? "Demo" : state.src === "mic" ? "Mic" : "File";
   $("r-srcs").textContent = state.running ? (state.src === "demo" ? noteOf(state.demoPitch) + " [" + state.demoVowel + "]" : "running") : "not started";
+  $("hi-note").hidden = !(a && a.f0 && a.conf > 0.5 && a.f0 >= 500);
   if (a && a.f0 && a.conf > 0.5) { $("r-f0").textContent = noteOf(a.f0); $("r-f0hz").textContent = Math.round(a.f0) + " Hz"; }
   else { $("r-f0").textContent = "–"; $("r-f0hz").textContent = a ? "no steady pitch" : " "; }
   if (a) {
@@ -1017,72 +1111,37 @@ function autoNow() {
   const a = last || analyze();
   if (!a || !a.f0) { statusEl.textContent = "I need a steady pitched sound to estimate from. Start the input, or freeze on a steady vowel."; return; }
   statusEl.textContent = "";
-  const est = estimate(a.corrected, a.f0);
-  if (est.length) applyEstimate(est, 1);
-  coarseSearch(a);
-  refine(a);
+  const cands = cpCandidates(a.raw, a.f0);
+  if (cands.length) {
+    // the candidates differ only in which stretch of the cycle was treated as closed;
+    // keep the one that leaves the flattest closed phase (closures found afresh for each)
+    let best = Infinity, pick = cands[0];
+    for (const est of cands) {
+      state.fr = FR_DEF.map((d) => ({ f: d.f, bw: d.bw, on: true }));
+      applyEstimate(est, 1);
+      const r = analyze(), v = r && r.ripple != null ? r.ripple : 9;
+      if (v < best) { best = v; pick = est; }
+    }
+    state.fr = FR_DEF.map((d) => ({ f: d.f, bw: d.bw, on: true }));
+    applyEstimate(pick, 1);
+  } else {
+    const e2 = estimate(a.corrected, a.f0);
+    if (e2.length) applyEstimate(e2, 1);
+    coarseSearch(a);
+    refine(a);
+  }
   // keep them in order, lowest to highest
   const fs5 = state.fr.map((r) => r.f).sort((x, y) => x - y);
   state.fr.forEach((r, i) => { r.f = Math.max(FR_DEF[i].lo, Math.min(FR_DEF[i].hi, fs5[i])); });
+  // on a real voice, cut off just above the resonances being removed: higher up, the inverse filter
+  // only lifts breath noise and resonances the five handles don't cover (the demo keeps its setting)
+  if (state.src !== "demo") {
+    const r4 = state.fr[3].on ? state.fr[3].f : 0;
+    state.lp = Math.min(6000, Math.max(3500, Math.ceil((r4 + 300) / 100) * 100));
+    $("lp").value = state.lp; $("lp-out").textContent = state.lp + " Hz";
+  }
   syncSliders();
   needsDraw = true;
-}
-// LPC often puts fR2 and fR3 in the wrong place on real voices, so try a coarse grid of fR2/fR3 pairs first
-function coarseSearch(a0) {
-  const a = analyze();
-  if (!a || !a.gcis || !a.f0) return;
-  const T = fs / a.f0, start = Math.max(0, Math.round(a.view[0] - 2 * T - 200));
-  const buf = a.src.subarray(start), gcis = a.gcis.map((g) => g - start), s0 = a.view[0] - start, s1 = a.view[1] - start;
-  const score = () => { const r = inverseFilter(buf); removeBaseline(r.flow, T); const v = closedRipple(r.flow, gcis, T, s0, s1); return v == null ? 9 : v; };
-  const r1 = state.fr[0], r2 = state.fr[1], r3 = state.fr[2], r4 = state.fr[3];
-  const saved = state.fr.map((r) => ({ ...r }));
-  let best = score(), bestSet = saved;
-  const f1c = r1.f, f1s = [0.85, 0.92, 1, 1.08, 1.17].map((m) => f1c * m).filter((f) => f >= FR_DEF[0].lo && f <= FR_DEF[0].hi);
-  const f3s = []; for (let f = 1600; f <= 3600; f *= 1.07) f3s.push(f);
-  r1.bw = 90; r2.bw = 160; r3.bw = 200;
-  for (const f1 of f1s) {
-    r1.f = f1;
-    for (let f2 = Math.max(FR_DEF[1].lo, f1 * 1.4); f2 <= 2800; f2 *= 1.07) for (const f3 of f3s) {
-      if (f3 < f2 * 1.1 || f3 > r4.f / 1.05) continue;
-      r2.f = f2; r3.f = f3;
-      const sc = score();
-      if (sc < best) { best = sc; bestSet = state.fr.map((r) => ({ ...r })); }
-    }
-  }
-  state.fr = bestSet.map((r) => ({ ...r }));
-}
-// fine-tune the way a person would: nudge each resonance until the closed phase is as flat as it gets
-function refine(a0) {
-  const a = analyze();
-  if (!a || !a.gcis || !a.f0) return Infinity;
-  const T = fs / a.f0, start = Math.max(0, Math.round(a.view[0] - 2 * T - 200));
-  const buf = a.src.subarray(start), gcis = a.gcis.map((g) => g - start), s0 = a.view[0] - start, s1 = a.view[1] - start;
-  const score = () => { const r = inverseFilter(buf); removeBaseline(r.flow, T); const v = closedRipple(r.flow, gcis, T, s0, s1); return v == null ? 9 : v; };
-  let best = score(), evals = 0;
-  let fStep = 0.04, bStep = 0.3;
-  for (let round = 0; round < 4 && evals < 260; round++) {
-    let improved = true;
-    while (improved && evals < 260) {
-      improved = false;
-      state.fr.forEach((r, i) => {
-        if (!r.on) return;
-        const d = FR_DEF[i];
-        for (const [key, mult] of [["f", 1 + fStep], ["f", 1 - fStep], ["bw", 1 + bStep], ["bw", 1 / (1 + bStep)]]) {
-          const old = r[key], nv = key === "f" ? Math.max(d.lo, Math.min(d.hi, old * mult)) : Math.max(30, Math.min(500, old * mult));
-          if (nv === old) continue;
-          if (key === "f") {
-            const below = state.fr.slice(0, i).filter((q) => q.on).pop(), above = state.fr.slice(i + 1).find((q) => q.on);
-            if ((below && nv < below.f * 1.08) || (above && nv > above.f / 1.08)) continue;
-          }
-          r[key] = nv; const sc = score(); evals++;
-          if (sc < best - 1e-4) { best = sc; improved = true; } else r[key] = old;
-        }
-      });
-    }
-    fStep /= 2; bStep /= 2;
-  }
-  syncSliders();
-  return best;
 }
 $("auto").addEventListener("click", autoNow);
 $("track").addEventListener("change", (e) => { state.track = e.target.checked; });
